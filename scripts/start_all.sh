@@ -14,10 +14,21 @@ PY=".venv/bin/python"
 log() { printf '\033[1;32m[start_all]\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31m[start_all]\033[0m %s\n' "$*" >&2; exit 1; }
 
-command -v docker >/dev/null || die "docker not found"
-command -v tmux   >/dev/null || die "tmux not found (sudo apt install tmux)"
-command -v npm    >/dev/null || die "npm not found"
-command -v python3 >/dev/null || die "python3 not found"
+# ---- 0. Dependencies (docker, tmux, node/npm, python3) ------------------------
+missing=()
+for tool in docker tmux node npm python3; do
+  command -v "$tool" >/dev/null || missing+=("$tool")
+done
+if [[ ${#missing[@]} -gt 0 ]]; then
+  log "missing dependencies: ${missing[*]} — running installer"
+  bash "$ROOT/scripts/install_deps.sh"
+  for tool in "${missing[@]}"; do
+    command -v "$tool" >/dev/null || die "$tool still not found after install — install it manually and re-run"
+  done
+fi
+
+# docker binary may exist while the daemon is down — installer also handles this
+docker info >/dev/null 2>&1 || bash "$ROOT/scripts/install_deps.sh"
 
 # ---- 1. .env ----------------------------------------------------------------
 if [[ ! -f .env ]]; then
