@@ -80,6 +80,7 @@ def _do_scrape(job: Job, params: dict) -> str:
         params.get("query", ""),
         params.get("city"),
         int(params.get("max_results", 120)),
+        job_id=job.id,
     )
     if result.get("blocked"):
         _mark(job.id, "blocked", error=result.get("error"))

@@ -27,6 +27,12 @@ const PAGE_META: Record<Page, { title: string; subtitle: string }> = {
 
 export function App() {
   const [page, setPage] = useState<Page>("leads");
+  const [leadsJobId, setLeadsJobId] = useState<number | undefined>();
+
+  function navigate(p: Page) {
+    setLeadsJobId(undefined); // manual nav to Leads starts unfiltered
+    setPage(p);
+  }
 
   const { data: count } = useQuery({
     queryKey: ["leads-count"],
@@ -43,11 +49,20 @@ export function App() {
   return (
     <div className="shell">
       <div className="card">
-        <Sidebar page={page} onNavigate={setPage} />
+        <Sidebar page={page} onNavigate={navigate} />
         <main className="main">
           <Topbar title={meta.title} subtitle={subtitle} />
-          {page === "leads" && <LeadsPage />}
-          {page === "jobs" && <JobsPage />}
+          {page === "leads" && (
+            <LeadsPage key={leadsJobId ?? "all"} initialJobId={leadsJobId} />
+          )}
+          {page === "jobs" && (
+            <JobsPage
+              onViewLeads={(id) => {
+                setLeadsJobId(id);
+                setPage("leads");
+              }}
+            />
+          )}
           {page === "enrichment" && <EnrichmentPage />}
           {page === "scoring" && <ScoringPage />}
           {page === "export" && <ExportPage />}

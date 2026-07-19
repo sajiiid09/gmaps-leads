@@ -40,6 +40,7 @@ export interface LeadFilters {
   has_phone?: boolean;
   min_rating?: number;
   search?: string;
+  job_id?: number;
   sort?: string;
   order?: string;
   page?: number;
@@ -79,6 +80,20 @@ export async function createJob(body: {
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`job create failed: ${res.status}`);
+  return res.json();
+}
+
+export async function deleteLead(id: number): Promise<{ deleted: number }> {
+  const res = await fetch(`/api/leads/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`lead delete failed: ${res.status}`);
+  return res.json();
+}
+
+export async function deleteJobData(
+  jobId: number,
+): Promise<{ deleted_leads: number; unlinked_shared: number }> {
+  const res = await fetch(`/api/jobs/${jobId}/data`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`job data delete failed: ${res.status}`);
   return res.json();
 }
 

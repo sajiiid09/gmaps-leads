@@ -7,7 +7,7 @@ from sqlalchemy import Select, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
-from app.db.models import Business, Enrichment, Score
+from app.db.models import Business, Enrichment, JobBusiness, Score
 
 router = APIRouter()
 
@@ -32,8 +32,14 @@ def _filtered_query(
     min_rating: float | None,
     search: str | None,
     source_query: str | None = None,
+    job_id: int | None = None,
 ) -> Select:
     q = select(Business)
+    if job_id is not None:
+        # one link row max per (job, business) — join cannot duplicate rows
+        q = q.join(JobBusiness, JobBusiness.business_id == Business.id).where(
+            JobBusiness.job_id == job_id
+        )
     if source_query:
         q = q.where(Business.source_query.ilike(source_query))
     if city:
@@ -86,12 +92,15 @@ def list_leads(
     has_phone: bool | None = None,
     min_rating: float | None = None,
     search: str | None = None,
+    job_id: int | None = None,
     sort: str = "scraped_at",
     order: str = "desc",
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
 ):
-    q = _filtered_query(city, category, has_website, has_phone, min_rating, search)
+    q = _filtered_query(
+        city, category, has_website, has_phone, min_rating, search, job_id=job_id
+    )
     total = db.scalar(select(func.count()).select_from(q.subquery()))
     if sort not in SORTABLE:
         sort = "scraped_at"
@@ -114,6 +123,16 @@ def get_lead(lead_id: int, db: Session = Depends(get_db)):
     return _serialize(b)
 
 
+@router.delete("/leads/{lead_id}")
+def delete_lead(lead_id: int, db: Session = Depends(get_db)):
+    b = db.get(Business, lead_id)
+    if not b:
+        raise HTTPException(404, "lead not found")
+    db.delete(b)  # enrichment/score/job links cascade
+    db.commit()
+    return {"deleted": lead_id}
+
+
 @router.get("/export.csv")
 def export_csv(
     db: Session = Depends(get_db),
@@ -123,11 +142,14 @@ def export_csv(
     has_phone: bool | None = None,
     min_rating: float | None = None,
     search: str | None = None,
+    job_id: int | None = None,
     columns: str | None = None,
     include_score: bool = False,
     include_enrichment: bool = False,
 ):
-    q = _filtered_query(city, category, has_website, has_phone, min_rating, search)
+    q = _filtered_query(
+        city, category, has_website, has_phone, min_rating, search, job_id=job_id
+    )
     q = q.order_by(Business.name.asc())
 
     # Resolve the column set: explicit ?columns= wins; otherwise base + flags.
@@ -181,8 +203,9 @@ def export_csv(
             buf.seek(0)
             buf.truncate(0)
 
+    filename = f"leads-job-{job_id}.csv" if job_id is not None else "leads.csv"
     return StreamingResponse(
         generate(),
         media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=leads.csv"},
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
     )

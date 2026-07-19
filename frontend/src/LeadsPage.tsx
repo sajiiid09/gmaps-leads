@@ -1,5 +1,10 @@
 import { useMemo, useState } from "react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import {
   createColumnHelper,
   flexRender,
@@ -7,8 +12,11 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import {
+  deleteLead,
   exportCsvUrl,
+  fetchJobs,
   fetchLeads,
+  type Job,
   type Lead,
   type LeadFilters,
 } from "./api.ts";
@@ -79,12 +87,14 @@ function pageList(current: number, max: number): (number | "…")[] {
   return out;
 }
 
-export function LeadsPage() {
+export function LeadsPage({ initialJobId }: { initialJobId?: number }) {
+  const qc = useQueryClient();
   const [filters, setFilters] = useState<LeadFilters>({
     sort: "scraped_at",
     order: "desc",
     page: 1,
     page_size: PAGE_SIZE,
+    job_id: initialJobId,
   });
   const [selected, setSelected] = useState<Lead | null>(null);
 
@@ -92,6 +102,19 @@ export function LeadsPage() {
     queryKey: ["leads", filters],
     queryFn: () => fetchLeads(filters),
     placeholderData: keepPreviousData,
+  });
+
+  const { data: jobsData } = useQuery({ queryKey: ["jobs"], queryFn: fetchJobs });
+  const scrapeJobs = (jobsData?.items ?? []).filter(
+    (j: Job) => j.type === "scrape",
+  );
+
+  const removeLead = useMutation({
+    mutationFn: deleteLead,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["leads"] });
+      qc.invalidateQueries({ queryKey: ["leads-count"] });
+    },
   });
 
   const rows = useMemo(() => data?.items ?? [], [data]);
@@ -185,6 +208,19 @@ export function LeadsPage() {
           <option value="4">4+</option>
           <option value="4.5">4.5+</option>
         </select>
+        <select
+          value={filters.job_id ?? ""}
+          onChange={(e) =>
+            patch({ job_id: e.target.value ? Number(e.target.value) : undefined })
+          }
+        >
+          <option value="">any job</option>
+          {scrapeJobs.map((j) => (
+            <option key={j.id} value={j.id}>
+              #{j.id} — {j.params.query}
+            </option>
+          ))}
+        </select>
         <span className="count">{isFetching ? "…" : `${total} leads`}</span>
       </div>
 
@@ -203,7 +239,7 @@ export function LeadsPage() {
                       : ""}
                   </th>
                 ))}
-                <th style={{ width: 40 }} />
+                <th style={{ width: 72 }} />
               </tr>
             ))}
           </thead>
@@ -225,6 +261,17 @@ export function LeadsPage() {
                     title="Details"
                   >
                     ⋯
+                  </button>
+                  <button
+                    className="dots-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (confirm(`Delete lead "${row.original.name}"?`))
+                        removeLead.mutate(row.original.id);
+                    }}
+                    title="Delete lead"
+                  >
+                    🗑
                   </button>
                 </td>
               </tr>
