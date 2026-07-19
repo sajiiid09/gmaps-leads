@@ -12,7 +12,12 @@ from botasaurus.browser import Driver, browser
 
 from app.config import settings
 from app.scraper import selectors
-from app.scraper.db_io import derive_place_key, existing_place_keys, upsert_business
+from app.scraper.db_io import (
+    derive_place_key,
+    existing_place_key_ids,
+    link_job_business,
+    upsert_business,
+)
 from app.scraper.politeness import (
     BlockedError,
     DailyCapReached,
@@ -114,10 +119,11 @@ def _extract_detail(driver: Driver) -> dict:
     close_on_crash=True,
 )
 def scrape_maps_query(driver: Driver, data: dict):
-    """data: {"query": str, "city": str, "max_results": int}"""
+    """data: {"query": str, "city": str, "max_results": int, "job_id": int | None}"""
     query = data["query"]
     city = data.get("city")
     max_results = int(data.get("max_results", 120))
+    job_id = data.get("job_id")
 
     driver.google_get(
         MAPS_SEARCH_URL.format(query=quote(query)), accept_google_cookies=True
@@ -127,12 +133,14 @@ def scrape_maps_query(driver: Driver, data: dict):
     links = _collect_place_links(driver, max_results)
     log.info("query %r: %d place links collected", query, len(links))
 
-    known = existing_place_keys()
+    known = existing_place_key_ids()
     scraped, skipped = 0, 0
     results = []
     for href in links:
         place_key = derive_place_key(href, None, None)
         if place_key in known:
+            # already scraped by an earlier job — still record that this job found it
+            link_job_business(job_id, known[place_key])
             skipped += 1
             continue
 
@@ -163,8 +171,9 @@ def scrape_maps_query(driver: Driver, data: dict):
             "raw": raw,
             "source_query": query,
         }
-        upsert_business(record)
-        known.add(record["place_key"])
+        business_id = upsert_business(record)
+        known[record["place_key"]] = business_id
+        link_job_business(job_id, business_id)
         scraped += 1
         results.append(record["name"])
         log.info("saved [%d]: %s", scraped, raw["name"])
@@ -172,11 +181,13 @@ def scrape_maps_query(driver: Driver, data: dict):
     return {"query": query, "scraped": scraped, "skipped_existing": skipped}
 
 
-def run_query(query: str, city: str | None, max_results: int) -> dict:
+def run_query(
+    query: str, city: str | None, max_results: int, job_id: int | None = None
+) -> dict:
     """Wrapper handling politeness exceptions into a result dict."""
     try:
         return scrape_maps_query(
-            {"query": query, "city": city, "max_results": max_results}
+            {"query": query, "city": city, "max_results": max_results, "job_id": job_id}
         )
     except BlockedError as e:
         log.error("BLOCKED: %s", e)

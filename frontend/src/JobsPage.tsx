@@ -1,10 +1,14 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createJob, fetchJobs, type Job } from "./api.ts";
+import { createJob, deleteJobData, fetchJobs, type Job } from "./api.ts";
 
 const ACTIVE = new Set(["pending", "running"]);
 
-export function JobsPage() {
+export function JobsPage({
+  onViewLeads,
+}: {
+  onViewLeads?: (jobId: number) => void;
+}) {
   const qc = useQueryClient();
   const [query, setQuery] = useState("");
   const [city, setCity] = useState("");
@@ -22,6 +26,19 @@ export function JobsPage() {
   const mutation = useMutation({
     mutationFn: createJob,
     onSuccess: () => qc.invalidateQueries({ queryKey: ["jobs"] }),
+  });
+
+  const wipeData = useMutation({
+    mutationFn: deleteJobData,
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      qc.invalidateQueries({ queryKey: ["leads"] });
+      qc.invalidateQueries({ queryKey: ["leads-count"] });
+      alert(
+        `Deleted ${res.deleted_leads} lead(s); ` +
+          `${res.unlinked_shared} shared lead(s) kept (still linked to other jobs).`,
+      );
+    },
   });
 
   const jobs = data?.items ?? [];
@@ -79,6 +96,7 @@ export function JobsPage() {
               <th>Saved</th>
               <th>Created</th>
               <th>Error</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -91,11 +109,44 @@ export function JobsPage() {
                 <td>{j.progress}</td>
                 <td>{j.created_at ? new Date(j.created_at).toLocaleString() : "—"}</td>
                 <td className="muted">{j.error ?? ""}</td>
+                <td style={{ whiteSpace: "nowrap" }}>
+                  {j.type === "scrape" && (
+                    <>
+                      <a
+                        className="btn secondary"
+                        href={`/api/export.csv?job_id=${j.id}`}
+                      >
+                        CSV
+                      </a>{" "}
+                      <button
+                        className="btn secondary"
+                        onClick={() => onViewLeads?.(j.id)}
+                      >
+                        Leads
+                      </button>{" "}
+                      <button
+                        className="btn secondary"
+                        disabled={wipeData.isPending}
+                        onClick={() => {
+                          if (
+                            confirm(
+                              `Delete all data scraped by job #${j.id} (“${j.params.query}”)? ` +
+                                `Leads also found by other jobs are kept.`,
+                            )
+                          )
+                            wipeData.mutate(j.id);
+                        }}
+                      >
+                        Delete data
+                      </button>
+                    </>
+                  )}
+                </td>
               </tr>
             ))}
             {jobs.length === 0 && (
               <tr>
-                <td colSpan={7} className="muted">
+                <td colSpan={8} className="muted">
                   No jobs yet.
                 </td>
               </tr>

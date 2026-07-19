@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
@@ -48,3 +48,30 @@ def create_job(body: JobCreate, db: Session = Depends(get_db)):
 def list_jobs(db: Session = Depends(get_db), limit: int = 50):
     rows = db.scalars(select(Job).order_by(Job.id.desc()).limit(limit)).all()
     return {"items": [_serialize(j) for j in rows]}
+
+
+@router.delete("/jobs/{job_id}/data")
+def delete_job_data(job_id: int, db: Session = Depends(get_db)):
+    """Delete leads found only by this job; shared leads just lose the link.
+
+    The job row itself is kept as history.
+    """
+    if not db.get(Job, job_id):
+        raise HTTPException(404, "job not found")
+    deleted = db.execute(
+        text(
+            "DELETE FROM businesses b "
+            "USING job_businesses jb "
+            "WHERE jb.business_id = b.id AND jb.job_id = :job_id "
+            "AND NOT EXISTS (SELECT 1 FROM job_businesses o "
+            "WHERE o.business_id = b.id AND o.job_id <> :job_id)"
+        ),
+        {"job_id": job_id},
+    ).rowcount
+    # links to shared leads (exclusive ones already cascaded away)
+    unlinked = db.execute(
+        text("DELETE FROM job_businesses WHERE job_id = :job_id"),
+        {"job_id": job_id},
+    ).rowcount
+    db.commit()
+    return {"deleted_leads": deleted, "unlinked_shared": unlinked}

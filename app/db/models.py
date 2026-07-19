@@ -60,6 +60,22 @@ class Job(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class JobBusiness(Base):
+    """Which scrape jobs found which businesses (incl. dedup-skipped finds)."""
+
+    __tablename__ = "job_businesses"
+
+    job_id: Mapped[int] = mapped_column(
+        ForeignKey("jobs.id", ondelete="CASCADE"), primary_key=True
+    )
+    business_id: Mapped[int] = mapped_column(
+        ForeignKey("businesses.id", ondelete="CASCADE"), primary_key=True, index=True
+    )
+    found_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class Enrichment(Base):
     __tablename__ = "enrichments"
 
